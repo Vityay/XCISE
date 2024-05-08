@@ -80,7 +80,7 @@ gunzip Mus_musculus.GRCm39.110.gtf.gz
 STAR --runMode genomeGenerate --genomeDir GRCm39_STAR --genomeFastaFiles Mus_musculus.GRCm39.dna.primary_assembly.fa --sjdbGTFfile Mus_musculus.GRCm39.110.gtf --sjdbOverhang 42 --runThreadN 16 
 
 #### Step 1.4. Get scRNA-seq data for sample 133C
-for i in {2717189..2717783}; do
+for i in {2717189..2717786}; do
     wget ftp://ftp.sra.ebi.ac.uk/vol1/run/ERR271/ERR${i}/*.fastq.gz
 done 
 
