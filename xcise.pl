@@ -10,13 +10,17 @@ use strict;
 # -u min number of UMIs per SNV
 # -m allowed MAF per SNV
 # -p discordant penalty
+# -x scramble alleles randomly
+# -i improve existsing solution
 
 warn "Reading parameters ...\n"; 
 my ( $sample, $chromosome, $snv_file);
 my $tries = 100;
-my $min_maf = 0.25;
+my $min_maf = 0;
 my $min_umis = 10;
 my $discordant_penalty = 5;
+my $scramble_alleles = 0;
+my $improve_existing = 0;
 my %bams = ();
 my $ele = 0;
 while ( $ele <= $#ARGV ) {
@@ -56,6 +60,14 @@ while ( $ele <= $#ARGV ) {
         $discordant_penalty = $ARGV[$ele+1];
         $ele+=2;
     }
+    elsif ( $ele <= $#ARGV and $ARGV[$ele] eq '-x' ) { #Scramble alleles
+        $scramble_alleles = 1;
+        $ele++;
+    }
+    elsif ( $ele <= $#ARGV and $ARGV[$ele] eq '-i' ) { #Improve existsing solution
+        $improve_existing = 1;
+        $ele++;
+    }
     else {
         die "Unexpected/incomplete parameter:$ARGV[$ele]";
     }
@@ -73,7 +85,7 @@ $tries = 100 if $tries <= 0;
 warn "Number of tries: ", $tries, "\n";
 $min_umis = 10 if $min_umis <= 0;
 warn "Min number of UMIs per SNV: ", $min_umis, "\n";
-$min_maf = 0.25 if $min_maf <= 0 or $min_maf >= 1;
+$min_maf = 0 if $min_maf < 0 or $min_maf > 0.5;
 warn "Min MAF per SNV: ", $min_maf, "\n";
 $discordant_penalty = 5 if $discordant_penalty < 1;
 warn "Discordant penalty: ", $discordant_penalty, "\n";
@@ -118,6 +130,12 @@ foreach my $file ( sort keys %bams ) {
         else {
             die "Found no CB, no RG tags in BAM file in read $line";
         }
+#        my ( $cb ) = $line =~ m/\tCB\:Z\:(\S+)/;
+#        my ( $rg ) = $line =~ m/\tRG\:Z\:(\S+)/;
+#        if ( $cb or $rg ) {
+#            next if $cb eq '-';
+#            $cb = ( $rg and $cb ) ? $rg.'_'.$cb : $cb ? $cb : $rg;
+#        }
         my $umi;
         if ( $line =~ m/\tUB\:Z\:(\S+)/ ) {
             $umi = $1;
@@ -136,6 +154,7 @@ foreach my $file ( sort keys %bams ) {
             next unless exists($snp_info{$pos});
             my $allele = $vA[$ele];
             next unless $allele == 1 or $allele == 2;
+            $allele = 1+int(rand(2)) if $scramble_alleles;
             $inf_alleles++;
             $umis{$pos}{$allele}{$umi."\t".$cb}++;
             $cb2allele{$cb}{$pos}{$umi}=$allele;
@@ -151,6 +170,7 @@ die "Zero cells, run terminated" unless keys %cb2allele;
 warn "Checking AFs after WASP genotyping ...\n";
 my @phased_pos = ();
 my @phased_dir = ();
+my @ratios = ();
 my $low_umis = 0;
 my $low_maf = 0;
 foreach my $pos ( sort {$a<=>$b} keys %umis ) {
@@ -159,6 +179,9 @@ foreach my $pos ( sort {$a<=>$b} keys %umis ) {
         next;
     }
     my $af = scalar(keys %{$umis{$pos}{1}}) / ( scalar(keys %{$umis{$pos}{1}}) + scalar(keys %{$umis{$pos}{2}} ) );
+    my ( $min, $max ) = ( scalar(keys %{$umis{$pos}{1}}), scalar(keys %{$umis{$pos}{2}}));
+    ( $min, $max ) = ( $max, $min ) if $min > $max;
+    push @ratios, 100*$min/($min+$max); 
     if ( $af < $min_maf or $af > ( 1 - $min_maf ) ) {
         $low_maf++;
         next;
@@ -169,10 +192,17 @@ foreach my $pos ( sort {$a<=>$b} keys %umis ) {
 die "No SNVs to phase\n" unless @phased_pos;
 warn "Excluded $low_umis SNVs having less than $min_umis reads/UMIs\n" if $low_umis;
 warn "Excluded $low_maf SNVs having less than $min_maf minor allele frequency\n" if $low_maf;
+@ratios = sort {$a<=>$b} @ratios;
+if ( @ratios % 2 ) {
+    warn "Median MAF:", $ratios[$#ratios/2],"\n";
+}
+else {
+    warn "Median MAF:", ($ratios[@ratios/2]+$ratios[@ratios/2-1])/2,"\n";
+}
 
 warn "Starting XCI calling\n";
 my $global_best = q{};
-foreach my $try ( 1 .. 100 ) {
+foreach my $try ( 1 .. $tries ) {
 
     warn "Try #$try, randomizing order and XCI status ...\n";
     foreach my $ele ( 0 .. $#phased_pos ) {
@@ -290,6 +320,16 @@ foreach my $try ( 1 .. 100 ) {
         } # foreach ele
         warn "    Pass: $pass Improvements: $imps Score: $best_score  Global best: $global_best\n";
     } # while imps
+    if ( $improve_existing and -s $sample.'_chr'.$chromosome.'_XCISE_summary.txt' ) {
+        open FLOG, $sample.'_chr'.$chromosome.'_XCISE_summary.txt';
+        my $line = <FLOG>;
+        die "Error reading summary file from previous run: $line" unless $line =~ m/^Best\sscore\s+\:\s+(\d+)/;
+        if ( !$global_best or $1 > $global_best ) {
+             $global_best = $1; 
+             warn "    Updated global best score from previous run: $global_best\n";
+        }
+        close FLOG;
+    }
     warn "    Finished at Pass: $pass, SNV: $last_imp/",scalar(@phased_dir), " Final score: $best_score Global best: $global_best\n"; 
     next if $global_best and $global_best >= $best_score;
     $global_best = $best_score;
@@ -319,22 +359,27 @@ foreach my $try ( 1 .. 100 ) {
             $conc += $max - 1;
         }
 
-        ( $total0, $total1, $total2, $total3, $total4 ) = ( 0, 0, 0, 0, 0 );
+        warn '    Total XCI-informative UMIs   : ', $total, "\n";
+        warn '    SNVs XCI-informative/non-inf : ', $ref1+$alt1,'/',$noninf, "\n";
         open FLOG, '>', $sample.'_chr'.$chromosome.'_XCISE_summary.txt';
         print FLOG 'Best score  : ', $best_score, "\n";
         print FLOG 'Total UMIs  : ', $total, "\n";
         print FLOG 'Concordant  : ', $conc, "\n";
         print FLOG 'Discordant  : ', $disc, "\n";
-        print FLOG 'Discordancy : ', $disc/($conc+$disc), "\n";
+        if ( $conc+$disc ) {
+            print FLOG 'Discordancy : ', $disc/($conc+$disc), "\n";
+            warn '    Final discordancy rate       : ', 100*$disc/($conc+$disc), "\n";
+        }
+        else {
+            print FLOG 'Discordancy : N/A', "\n";
+            warn '    Final discordancy rate       : N/A', "\n";
+        }
         print FLOG 'Total SNVs  : ', scalar(@phased_dir), "\n";
         print FLOG 'SNV Ref/Alt : ', $ref1, "\n";
         print FLOG 'SNV Alt/Ref : ', $alt1, "\n";
         print FLOG 'Non-inf SNVs: ', $noninf, "\n";
-        print FLOG 'XCI_inf SNVs: ', $ref1+$alt1, "\n";
+        print FLOG 'XCI-inf SNVs: ', $ref1+$alt1, "\n";
 
-        warn '    Total XCI-informative UMIs   : ', $total, "\n";
-        warn '    SNVs XCI-informative/non-inf : ', $ref1+$alt1,'/',$noninf, "\n";
-        warn '    Final discordancy rate       : ', 100*$disc/($conc+$disc), "\n";
 
         warn "    Outputting VCF...\n";
         open FVCF, '>', $sample.'_chr'.$chromosome.'_XCISE.vcf';
@@ -342,11 +387,13 @@ foreach my $try ( 1 .. 100 ) {
         print FVCF join( "\t", '#CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'INFO' ), "\n";
         foreach my $ele ( sort {$phased_pos[$a]<=>$phased_pos[$b]} ( 0 .. $#phased_dir ) ) {
             my $pos = $phased_pos[$ele];
-            print FVCF join( "\t", $chromosome, $pos, $snp_info{$pos}{'rs'}, $snp_info{$pos}{'ref'}, $snp_info{$pos}{'alt'}, scalar(keys %{$umis{$pos}{1}})+scalar(keys %{$umis{$pos}{2}}), 'PASS', 'DIR='.$phased_dir[$ele].';HAP1='.scalar(keys %{$umis{$pos}{1}}).';HAP2='.scalar(keys %{$umis{$pos}{2}}) ),"\n";  
+            my $x1_allele = $phased_dir[$ele] == 0 ? 'Unk' : $phased_dir[$ele] == 1 ? 'Ref' : $phased_dir[$ele] == -1 ? 'Alt' : 'Err';
+            print FVCF join( "\t", $chromosome, $pos, $snp_info{$pos}{'rs'}, $snp_info{$pos}{'ref'}, $snp_info{$pos}{'alt'}, scalar(keys %{$umis{$pos}{1}})+scalar(keys %{$umis{$pos}{2}}), 'PASS', 'X1A='.$x1_allele.';AD='.scalar(keys %{$umis{$pos}{1}}).','.scalar(keys %{$umis{$pos}{2}}) ),"\n";  
         }
         close FVCF;
 
         warn "    Outputting barcode to phase data...\n";
+        ( $total0, $total1, $total2, $total3, $total4 ) = ( 0, 0, 0, 0, 0 );
         open F, '>', $sample.'_chr'.$chromosome.'_XCISE_barcode_to_phase.txt';
         foreach my $cb ( sort keys %cb2allele ) {
             my ( $hap1, $hap2 ) = ( 0, 0 );
@@ -363,23 +410,23 @@ foreach my $try ( 1 .. 100 ) {
             my $hap = '?';
             if ( $hap1 == 0 and $hap2 == 0 ) {
                 $total0++;
-                $hap = 'UNKN';
+                $hap = 'Unknown';
             }
             elsif ( $hap1 >= 2 and $hap1/($hap1+$hap2) >= 0.9 ) {
                 $total1++;
-                $hap = 'HAP1';
+                $hap = 'X1';
             } 
             elsif ( $hap2 >= 2 and $hap2/($hap1+$hap2) >= 0.9 ) {
                 $total2++;
-                $hap = 'HAP2';
+                $hap = 'X2';
             } 
             elsif ( $hap1 > 0 and $hap2>0 ) {
                 $total3++;
-                $hap = 'BOTH';
+                $hap = 'Both';
             } 
             else {
                 $total4++;
-                $hap = 'LOWC';
+                $hap = 'Low_coverage';
             }
             print F join( "\t", $cb, $hap1, $hap2, $hap ), "\n";
         }
@@ -387,10 +434,10 @@ foreach my $try ( 1 .. 100 ) {
         my $grand_total = $total0+$total1+$total2+$total3+$total4;
 
         warn "    Outputing summary...\n";
-        printf FLOG "Haplotype 1 : %5d( %3.2f %% )\n", $total1, 100*$total1/$grand_total;
-        printf FLOG "Haplotype 2 : %5d( %3.2f %% )\n", $total2, 100*$total2/$grand_total;
-        printf FLOG "Unknown hap : %5d( %3.2f %% )\n", $total0, 100*$total0/$grand_total;
-        printf FLOG "Both H seen : %5d( %3.2f %% )\n", $total3, 100*$total3/$grand_total;
+        printf FLOG "X1 cells    : %5d( %3.2f %% )\n", $total1, 100*$total1/$grand_total;
+        printf FLOG "X2 cells    : %5d( %3.2f %% )\n", $total2, 100*$total2/$grand_total;
+        printf FLOG "Unknown     : %5d( %3.2f %% )\n", $total0, 100*$total0/$grand_total;
+        printf FLOG "Both X      : %5d( %3.2f %% )\n", $total3, 100*$total3/$grand_total;
         printf FLOG "LowCoverage : %5d( %3.2f %% )\n", $total4, 100*$total4/$grand_total;
         close FLOG;
         warn "    X1/X2/Both/LowC/Unknown cells: ", join( ' / ', $total1, $total2, $total3, $total4, $total0 ), "\n";

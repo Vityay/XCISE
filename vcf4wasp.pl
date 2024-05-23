@@ -19,7 +19,8 @@ while ( <F> ) {
     my ( $ref_pos, $ref_neg, $alt_pos, $alt_neg ) = split /\,/, $dp4;
     my $total = $ref_pos + $ref_neg + $alt_pos + $alt_neg;
     my $af = ( $alt_pos+$alt_neg) / $total; 
-    next if $af < 0.1 or $af > 0.9;
+    warn join( "\t", $pos, $dp4, $af ), "\n";
+    next if $af == 0 or $af == 1; # Non-polymorphic site
     print join( "\t", $chr, $pos, $rs, $ref, $alt, '.', '.', '.', 'GT', '0|1' ), "\n";
 }
 close F;
