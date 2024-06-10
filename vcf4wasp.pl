@@ -20,7 +20,7 @@ while ( <F> ) {
     my $total = $ref_pos + $ref_neg + $alt_pos + $alt_neg;
     my $af = ( $alt_pos+$alt_neg) / $total; 
     warn join( "\t", $pos, $dp4, $af ), "\n";
-    next if $af == 0 or $af == 1; # Non-polymorphic site
+    next if $af < 0.01 or $af > 0.99 ; # Skip likely monomorphic sites
     print join( "\t", $chr, $pos, $rs, $ref, $alt, '.', '.', '.', 'GT', '0|1' ), "\n";
 }
 close F;
