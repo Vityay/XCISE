@@ -60,7 +60,7 @@ Calling X-Chromosome Inactivation from Single-cell Expression data (XCISE)
 
 ```bcftools index 133C_variants_normalized.vcf.gz```
 
-#### Step 3.4. Overlap variants that are not common in population
+#### Step 3.4. Remove low quality call and variants that are not common in population
 
 ```bcftools isec -i'QUAL>=200' 133C_variants_normalized.vcf.gz GRCh38_Common_Xlinked_SNVs.vcf.gz -p 133C_common_SNVs```
 
@@ -158,7 +158,7 @@ We created a tab-delinmited text file E-MTAB-6385_manifest.tsv with 3 columns wi
 
 ```bcftools index Fib_BxC_variants_normalized.vcf.gz```
 
-#### Step 3.4. Overlap variants that are not common in population *
+#### Step 3.4. Remove low quality calls and variants that are not common in population *
 
 ```bcftools isec -i'QUAL>=200' Fib_BxC_variants_normalized.vcf.gz GRCm39_Common_Xlinked_SNVs.vcf.gz -p Fib_BxC_common_SNVs```
 
