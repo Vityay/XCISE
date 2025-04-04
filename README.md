@@ -99,7 +99,7 @@ Calling X-Chromosome Inactivation from Single-cell Expression data (XCISE)
 
 ```gunzip Mus_musculus.GRCm39.110.gtf.gz```
 
-####Step 1.3. Index genome for STAR aligner
+#### Step 1.3. Index genome for STAR aligner
 
 ```STAR --runMode genomeGenerate --genomeDir GRCm39_STAR --genomeFastaFiles Mus_musculus.GRCm39.dna.primary_assembly.fa --sjdbGTFfile Mus_musculus.GRCm39.110.gtf --sjdbOverhang 42 --runThreadN 16```
 
